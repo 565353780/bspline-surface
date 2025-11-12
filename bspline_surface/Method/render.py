@@ -1,5 +1,7 @@
+import torch
 import numpy as np
 import open3d as o3d
+from typing import Union
 
 
 def renderGeometries(geometry_list, window_name="Geometry List"):
@@ -10,7 +12,15 @@ def renderGeometries(geometry_list, window_name="Geometry List"):
     return True
 
 
-def renderPoints(points: np.ndarray, window_name="Points"):
+def renderPoints(points: Union[np.ndarray, torch.Tensor], window_name="Points"):
+    if isinstance(points, torch.Tensor):
+        points_array = points.detach().clone().cpu().numpy()
+    else:
+        points_array = points
+
+
+    points_array = points_array.reshape(-1, 3).astype(np.float64)
+
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points.astype(np.float64))
+    pcd.points = o3d.utility.Vector3dVector(points_array)
     return renderGeometries(pcd, window_name)
