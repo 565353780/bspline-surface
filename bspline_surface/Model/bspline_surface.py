@@ -242,7 +242,7 @@ class BSplineSurface(object):
 
             self.sample_uv = sample_uv.detach().clone().type(self.dtype).to(self.device)
             self.sample_uv_loaded = True
-        
+
         # 参数变化后需要重置缓存
         self._cache_valid = False
         return True
@@ -331,40 +331,40 @@ class BSplineSurface(object):
         """预计算所有可复用的中间结果，最大化缓存利用"""
         if self._cache_valid:
             return
-        
+
         # 1. 预计算sigmoid knotvector (如果未加载)
         sigmoid_knotvector_u = self.toSigmoidKnotvectorU()
         sigmoid_knotvector_v = self.toSigmoidKnotvectorV()
-        
+
         # 2. 预计算规则网格的knots
         knots_u = torch.linspace(0.0, 1.0, self.sample_num_u, dtype=self.dtype, device=self.device)
         knots_v = torch.linspace(0.0, 1.0, self.sample_num_v, dtype=self.dtype, device=self.device)
-        
+
         # 3. 预计算索引偏移网格 (固定不变，仅依赖于degree)
         du_grid = torch.arange(0, self.degree_u + 1, dtype=torch.int64, device=self.device)
         dv_grid = torch.arange(0, self.degree_v + 1, dtype=torch.int64, device=self.device)
-        
+
         # 创建外积网格 [degree_u+1, degree_v+1] -> [(degree_u+1)*(degree_v+1)]
         du_mesh, dv_mesh = torch.meshgrid(du_grid, dv_grid, indexing='ij')
         self._cache['du_grid_flat'] = du_mesh.reshape(-1)
         self._cache['dv_grid_flat'] = dv_mesh.reshape(-1)
         self._cache['elem_num'] = (self.degree_u + 1) * (self.degree_v + 1)
-        
+
         # 4. 缓存sigmoid knotvector
         self._cache['sigmoid_knotvector_u'] = sigmoid_knotvector_u
         self._cache['sigmoid_knotvector_v'] = sigmoid_knotvector_v
-        
+
         # 5. 缓存规则网格的knots
         self._cache['knots_u'] = knots_u
         self._cache['knots_v'] = knots_v
-        
+
         # 6. 预计算规则网格的spans（仅在knotvector不变时有效）
         if not self.sample_uv_loaded:
             spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, self.size_u - 1)
             spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, self.size_v - 1)
             self._cache['spans_u'] = spans_u
             self._cache['spans_v'] = spans_v
-            
+
             # 7. 预计算规则网格的基函数（仅在knotvector和knots不变时有效）
             basis_u = self._computeBasisFunctionsBatch(
                 self.degree_u, sigmoid_knotvector_u, spans_u, knots_u
@@ -374,7 +374,7 @@ class BSplineSurface(object):
             )
             self._cache['basis_u'] = basis_u
             self._cache['basis_v'] = basis_v
-        
+
         self._cache_valid = True
 
     def toUVSamplePoints(
@@ -403,14 +403,10 @@ class BSplineSurface(object):
         if self.sample_uv_loaded:
             return self.toUVSamplePoints(self.sample_uv)
 
-        # 使用优化的并行计算版本
-        return self._toSamplePointsOptimized()
-
-    def _toSamplePointsOptimized(self) -> torch.Tensor:
         """高度优化的并行采样点计算，最大程度利用缓存和向量化"""
         # 确保缓存已预计算
         self._precomputeCache()
-        
+
         # 从缓存获取预计算的值
         sigmoid_knotvector_u = self._cache['sigmoid_knotvector_u']
         sigmoid_knotvector_v = self._cache['sigmoid_knotvector_v']
@@ -419,12 +415,12 @@ class BSplineSurface(object):
         du_grid_flat = self._cache['du_grid_flat']
         dv_grid_flat = self._cache['dv_grid_flat']
         elem_num = self._cache['elem_num']
-        
+
         # 控制点维度
         H, W, dim = self.ctrlpts.shape
         sample_num_u = self.sample_num_u
         sample_num_v = self.sample_num_v
-        
+
         # ===== 步骤1&2: 使用缓存的spans和basis（如果可用）=====
         if 'spans_u' in self._cache and 'basis_u' in self._cache:
             # 使用预计算的结果，避免重复计算
@@ -436,33 +432,33 @@ class BSplineSurface(object):
             # 实时计算spans和basis
             spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, H)
             spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, W)
-            
+
             basis_u = self._computeBasisFunctionsBatch(
                 self.degree_u, sigmoid_knotvector_u, spans_u, knots_u
             )
             basis_v = self._computeBasisFunctionsBatch(
                 self.degree_v, sigmoid_knotvector_v, spans_v, knots_v
             )
-        
+
         # ===== 步骤3: 并行计算控制点索引和采样 =====
         # 计算基础索引 [sample_num_u] 和 [sample_num_v]
         idx_u = spans_u - self.degree_u
         idx_v = spans_v - self.degree_v
-        
+
         # 扩展索引到 [sample_num_u, sample_num_v, elem_num]
         # 使用广播而不是循环
         idx_u_exp = idx_u.view(sample_num_u, 1, 1) + du_grid_flat.view(1, 1, elem_num)
         idx_v_exp = idx_v.view(1, sample_num_v, 1) + dv_grid_flat.view(1, 1, elem_num)
-        
+
         # 扁平化索引 [sample_num_u * sample_num_v * elem_num]
         flat_idx = (idx_u_exp * W + idx_v_exp).reshape(-1)
-        
+
         # 一次性gather所有需要的控制点
         flat_ctrlpts = self.ctrlpts.reshape(H * W, dim)
         sampled_ctrlpts = torch.index_select(flat_ctrlpts, 0, flat_idx).view(
             sample_num_u, sample_num_v, elem_num, dim
         )
-        
+
         # ===== 步骤4: 并行计算权重外积 =====
         # 使用广播计算权重外积
         # basis_u: [sample_num_u, degree_u+1]
@@ -471,10 +467,10 @@ class BSplineSurface(object):
         weights_u = basis_u.view(sample_num_u, 1, self.degree_u + 1, 1)
         weights_v = basis_v.view(1, sample_num_v, 1, self.degree_v + 1)
         weights = (weights_u * weights_v).reshape(sample_num_u, sample_num_v, elem_num, 1)
-        
+
         # ===== 步骤5: 加权求和得到最终采样点 =====
         sample_points = (sampled_ctrlpts * weights).sum(dim=2)
-        
+
         return sample_points
 
     def _computeSpansBatch(
@@ -484,42 +480,41 @@ class BSplineSurface(object):
         # 使用CPU进行searchsorted（通常更快），然后转回设备
         knotvector_cpu = knotvector.cpu().contiguous()
         knots_cpu = knots.cpu().contiguous()
-        
+
         indices = torch.searchsorted(knotvector_cpu, knots_cpu, right=False)
         spans = torch.clamp(indices - 1, self.degree_u, num_ctrlpts - 1)
-        
+
         return spans.to(knotvector.device)
-    
+
     def _computeBasisFunctionsBatch(
         self, degree: int, knotvector: torch.Tensor, spans: torch.Tensor, knots: torch.Tensor
     ) -> torch.Tensor:
         """批量计算B样条基函数，完全向量化"""
         batch_size = spans.size(0)
-        opts = torch.TensorOptions().dtype(knotvector.dtype).device(knotvector.device)
-        
+        dtype = knotvector.dtype
+        device = knotvector.device
+
         # 初始化
-        left = torch.zeros(batch_size, degree + 1, **opts)
-        right = torch.zeros(batch_size, degree + 1, **opts)
-        N = torch.ones(batch_size, degree + 1, **opts)
-        
-        batch_range = torch.arange(batch_size, dtype=torch.int64, device=knotvector.device)
-        
+        left = torch.zeros(batch_size, degree + 1, dtype=dtype, device=device)
+        right = torch.zeros(batch_size, degree + 1, dtype=dtype, device=device)
+        N = torch.ones(batch_size, degree + 1, dtype=dtype, device=device)
+
         # Cox-de Boor递推公式，向量化实现
         for j in range(1, degree + 1):
             left[:, j] = knots - knotvector[spans - j + 1]
             right[:, j] = knotvector[spans + j] - knots
-            
-            saved = torch.zeros(batch_size, **opts)
-            
+
+            saved = torch.zeros(batch_size, dtype=dtype, device=device)
+
             for r in range(j):
                 denominator = right[:, r + 1] + left[:, j - r]
                 temp = N[:, r] / denominator
-                
+
                 N[:, r] = saved + right[:, r + 1] * temp
                 saved = left[:, j - r] * temp
-            
+
             N[:, j] = saved
-        
+
         return N
 
     def toSamplePcd(self) -> o3d.geometry.PointCloud:
