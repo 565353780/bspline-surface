@@ -450,6 +450,10 @@ class BSplineSurface(object):
         idx_u_exp = idx_u.view(sample_num_u, 1, 1) + du_grid_flat.view(1, 1, elem_num)
         idx_v_exp = idx_v.view(1, sample_num_v, 1) + dv_grid_flat.view(1, 1, elem_num)
 
+        # 确保索引在有效范围内（添加边界保护）
+        idx_u_exp = torch.clamp(idx_u_exp, 0, H - 1)
+        idx_v_exp = torch.clamp(idx_v_exp, 0, W - 1)
+
         # 扁平化索引 [sample_num_u * sample_num_v * elem_num]
         flat_idx = (idx_u_exp * W + idx_v_exp).reshape(-1)
 
