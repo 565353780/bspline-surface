@@ -360,8 +360,8 @@ class BSplineSurface(object):
 
         # 6. 预计算规则网格的spans（仅在knotvector不变时有效）
         if not self.sample_uv_loaded:
-            spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, self.size_u - 1)
-            spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, self.size_v - 1)
+            spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, self.size_u - 1, self.degree_u)
+            spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, self.size_v - 1, self.degree_v)
             self._cache['spans_u'] = spans_u
             self._cache['spans_v'] = spans_v
 
@@ -430,8 +430,8 @@ class BSplineSurface(object):
             basis_v = self._cache['basis_v']
         else:
             # 实时计算spans和basis
-            spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, H)
-            spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, W)
+            spans_u = self._computeSpansBatch(sigmoid_knotvector_u, knots_u, H, self.degree_u)
+            spans_v = self._computeSpansBatch(sigmoid_knotvector_v, knots_v, W, self.degree_v)
 
             basis_u = self._computeBasisFunctionsBatch(
                 self.degree_u, sigmoid_knotvector_u, spans_u, knots_u
@@ -474,7 +474,7 @@ class BSplineSurface(object):
         return sample_points
 
     def _computeSpansBatch(
-        self, knotvector: torch.Tensor, knots: torch.Tensor, num_ctrlpts: int
+        self, knotvector: torch.Tensor, knots: torch.Tensor, num_ctrlpts: int, degree: int
     ) -> torch.Tensor:
         """批量计算spans，完全并行化"""
         # 使用CPU进行searchsorted（通常更快），然后转回设备
@@ -482,7 +482,7 @@ class BSplineSurface(object):
         knots_cpu = knots.cpu().contiguous()
 
         indices = torch.searchsorted(knotvector_cpu, knots_cpu, right=False)
-        spans = torch.clamp(indices - 1, self.degree_u, num_ctrlpts - 1)
+        spans = torch.clamp(indices - 1, degree, num_ctrlpts - 1)
 
         return spans.to(knotvector.device)
 

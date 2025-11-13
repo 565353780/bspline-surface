@@ -6,11 +6,11 @@ from bspline_surface.Model.bspline_surface import BSplineSurface
 
 def demo():
     degree_u = 3
-    degree_v = 3
+    degree_v = 5
     size_u = 10
-    size_v = 10
-    sample_num_u = 10
-    sample_num_v = 10
+    size_v = 20
+    sample_num_u = 30
+    sample_num_v = 40
     dtype = torch.float32
     device = 'cpu'
 
@@ -45,9 +45,9 @@ def demo():
     )
 
     surf_length = 1.0
-    for i in range(bspline_surface.size_u - 1):
-        ctrlpts[:, i, 0] = surf_length * (u_values - 0.5)
     for i in range(bspline_surface.size_v - 1):
+        ctrlpts[:, i, 0] = surf_length * (u_values - 0.5)
+    for i in range(bspline_surface.size_u - 1):
         ctrlpts[i, :, 1] = surf_length * (v_values - 0.5)
 
     bspline_surface.loadParams(ctrlpts=ctrlpts)
